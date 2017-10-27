@@ -20,13 +20,8 @@
 
 #include <sys/types.h>
 #include <stdio.h>
-
-#ifdef __APPLE__
+#include <string.h>
 #include <stdlib.h>
-#else
-#include <error.h>
-#endif
-
 #include <errno.h>
 
 #include "perf-map-file.h"
@@ -36,12 +31,8 @@ FILE *perf_map_open(pid_t pid) {
     snprintf(filename, sizeof(filename), "/tmp/perf-%d.map", pid);
     FILE * res = fopen(filename, "w");
     if (!res) {
-#ifdef __APPLE__
-        fprintf(stderr, "Couldn't open %s: errno(%d)", filename, errno);
-        exit(0);
-#else
-        error(0, errno, "Couldn't open %s.", filename);
-#endif
+        fprintf(stderr, "Couldn't open %s: [%s]\n", filename, strerror(errno));
+        exit(errno);
     }
     return res;
 }
@@ -57,3 +48,4 @@ void perf_map_write_entry(FILE *method_file, const void* code_addr, unsigned int
     if (method_file)
         fprintf(method_file, "%lx %x %s\n", (unsigned long) code_addr, code_size, entry);
 }
+
