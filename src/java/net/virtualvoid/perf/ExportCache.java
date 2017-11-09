@@ -40,6 +40,14 @@ public class ExportCache {
     private final static Pattern PATH = Pattern.compile("[^\\s]+");
     private final static Pattern PROCESS_MAP = Pattern.compile("(perf-)([\\d+]+).map$");
 
+    /** Working directory */
+    private final File workingDir;
+
+    /** Create new ExportCache */
+    public ExportCache(File workingDir) {
+        this.workingDir=workingDir;
+    }
+
     // Processing
 
     /** Process list of files and generate a zipped archive */
@@ -55,7 +63,10 @@ public class ExportCache {
             }
             // Missing symbols
             else if (!f.exists()) {
-                System.err.println(String.format("WARNING! Unable to resolve '%s'", f.getAbsolutePath()));
+                System.err.println(String.format("WARNING! Unable to resolve '%s' [MISSING]", f.getCanonicalPath()));
+            }
+            else if (!f.canRead()) {
+                System.err.println(String.format("WARNING! Unable to access '%s' [ACCESS DENIED]", f.getCanonicalPath()));
             }
             // Symbol file
             else {
@@ -74,7 +85,7 @@ public class ExportCache {
         // Format is [NNNNNNNNNN] [PATH]
         while (textIn.hasNext(BUILD_ID)) {
             textIn.next(BUILD_ID);
-            File path = new File(textIn.next(PATH));
+            File path = new File(this.workingDir,textIn.next(PATH));
             res.add(path);
         }
 
@@ -89,7 +100,7 @@ public class ExportCache {
             // Generate Attach map and output file
             AttachOnce.loadAgent(pid, DEFAULT_ATTACH_OPTIONS);
             if (!src.exists()) {
-                throw new UnsupportedOperationException(String.format("Expected map was not generated at %s", src.getAbsolutePath()));
+                throw new UnsupportedOperationException(String.format("Expected map was not generated at %s", src.getCanonicalPath()));
             }
             // Copy the generated map
             copy(src, out);
@@ -102,17 +113,20 @@ public class ExportCache {
     /** Copy file to archive */
     protected void copy(File src, ZipOutputStream out) throws IOException {
 
-        // Use absolute path
-        // PMCD: Question here re: ownership + permissions settings
-        ZipEntry entry = new ZipEntry(src.getAbsolutePath());
-        entry.setLastModifiedTime(FileTime.fromMillis(src.lastModified()));
-        out.putNextEntry(entry);
-
         try (InputStream in = new FileInputStream(src)) {
-            transferFromTo(in, out);
-        }
+            // Use absolute path
+            // PMCD: Question here re: ownership + permissions settings
+            ZipEntry entry = new ZipEntry(src.getCanonicalPath());
+            entry.setLastModifiedTime(FileTime.fromMillis(src.lastModified()));
+            out.putNextEntry(entry);
 
-        out.closeEntry();
+            transferFromTo(in, out);
+
+            out.closeEntry();
+        }
+        catch(IOException e) {
+            System.err.println(String.format("ERROR! Unable to read '%s'", src.getAbsolutePath()));
+        }
     }
 
     /**
@@ -135,10 +149,18 @@ public class ExportCache {
 
     /** Main */
     public static void main(String[] args) {
+
         int rc = 0;
+
+        File baseDir=new File(".");
+        if (args.length>0) {
+            // Use the location of the input file as the base-dir for relative paths
+            baseDir=new File(args[0]).getParentFile();
+        }
+
         try (InputStream in=args.length > 0 ? new FileInputStream(args[0]) : System.in;
              OutputStream out=args.length > 1 ? new FileOutputStream(args[1]) : System.out) {
-            ExportCache ec = new ExportCache();
+            ExportCache ec = new ExportCache(baseDir);
             ec.process(ec.parse(in), out);
         }
         catch (Throwable t) {
